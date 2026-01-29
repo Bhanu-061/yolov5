@@ -1,0 +1,214 @@
+import sys
+import cv2
+import torch
+import numpy as np
+from pathlib import Path
+from collections import defaultdict
+import os 
+
+def safe_imshow(win_name, frame):
+    try:
+        cv2.imshow(win_name, frame)
+        return True
+    except cv2.error:
+        return False
+
+
+
+# ---------------- YOLOv5 IMPORT ----------------
+FILE = Path(__file__).resolve()
+ROOT = FILE.parents[0] / 'yolov5-master'
+sys.path.append(str(ROOT))
+import pathlib
+temp = pathlib.PosixPath
+pathlib.PosixPath = pathlib.WindowsPath
+FILE = Path(__file__).resolve()
+ROOT = FILE.parents[0]  # YOLOv5 root directory
+if str(ROOT) not in sys.path:
+    sys.path.append(str(ROOT))  # add ROOT to PATH
+ROOT = Path(os.path.relpath(ROOT, Path.cwd()))  # relative
+from models.common import DetectMultiBackend
+from utils.general import non_max_suppression, scale_boxes
+from utils.torch_utils import select_device
+from utils.augmentations import letterbox
+
+# ---------------- SORT TRACKER ----------------
+sys.path.append(str(FILE.parents[0] / 'sort'))
+from sort import Sort
+
+# ---------------- UNIQUE OBJECT COUNTER ----------------
+class UniqueObjectCounter:
+    def __init__(self, class_names):
+        self.class_names = class_names
+        self.counted_ids = defaultdict(set)
+
+    def update(self, tracks, detections):
+        for track in tracks:
+            tx1, ty1, tx2, ty2, track_id = track
+            track_box = [tx1, ty1, tx2, ty2]
+
+            best_iou = 0
+            best_class = None
+            for det in detections:
+                dx1, dy1, dx2, dy2, conf, cls = det
+                iou = self.iou(track_box, [dx1, dy1, dx2, dy2])
+                if iou > best_iou:
+                    best_iou = iou
+                    best_class = int(cls)
+
+            if best_iou > 0.3:
+                self.counted_ids[best_class].add(int(track_id))
+
+    def iou(self, A, B):
+        xA, yA = max(A[0], B[0]), max(A[1], B[1])
+        xB, yB = min(A[2], B[2]), min(A[3], B[3])
+        inter = max(0, xB-xA) * max(0, yB-yA)
+        areaA = (A[2]-A[0])*(A[3]-A[1])
+        areaB = (B[2]-B[0])*(B[3]-B[1])
+        return inter / (areaA + areaB - inter + 1e-6)
+
+    def get_counts(self):
+        return {self.class_names[c]: len(ids) for c, ids in self.counted_ids.items()}
+
+# ---------------- LINE COUNTER ----------------
+class LineCounter:
+    def __init__(self, line_position, mode="both"):
+        self.line_y = line_position
+        self.mode = mode
+        self.entry_count = 0
+        self.exit_count = 0
+        self.track_memory = {}
+
+    def update(self, tracks):
+        for track in tracks:
+            x1, y1, x2, y2, track_id = map(int, track)
+            cy = int((y1 + y2) / 2)
+
+            if track_id not in self.track_memory:
+                self.track_memory[track_id] = cy
+                continue
+
+            prev_cy = self.track_memory[track_id]
+
+            if prev_cy < self.line_y and cy >= self.line_y:
+                if self.mode in ["entry", "both"]:
+                    self.entry_count += 1
+
+            elif prev_cy > self.line_y and cy <= self.line_y:
+                if self.mode in ["exit", "both"]:
+                    self.exit_count += 1
+
+            self.track_memory[track_id] = cy
+
+    def draw(self, frame):
+        h, w, _ = frame.shape
+        cv2.line(frame, (0, self.line_y), (w, self.line_y), (255, 0, 0), 2)
+        text = f"Entry: {self.entry_count}  Exit: {self.exit_count}"
+        cv2.putText(frame, text, (20, self.line_y - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 0), 2)
+
+# ---------------- MAIN PIPELINE ----------------
+def run(weights, source, line_mode, project, name, conf_thres, iou_thres, view_img):
+
+    save_dir = Path(project) / name
+    save_dir.mkdir(parents=True, exist_ok=True)
+
+    device = select_device('')
+    model = DetectMultiBackend(weights, device=device)
+    stride, names = model.stride, model.names
+
+    tracker = Sort(max_age=20, min_hits=3, iou_threshold=0.3)
+    unique_counter = UniqueObjectCounter(names)
+    line_counter = LineCounter(line_position=300, mode=line_mode)
+
+    cap = cv2.VideoCapture(source)
+    fps = int(cap.get(cv2.CAP_PROP_FPS)) or 25
+    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+    out_video_path = str(save_dir / "output.mp4")
+    writer = cv2.VideoWriter(out_video_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w, h))
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        img = letterbox(frame, 416, stride=stride, auto=True)[0]
+        img = img.transpose((2, 0, 1))[::-1]
+        img = np.ascontiguousarray(img)
+        img = torch.from_numpy(img).to(device).float() / 255.0
+        img = img.unsqueeze(0)
+
+        pred = model(img)
+        pred = non_max_suppression(pred, conf_thres, iou_thres)
+
+        detections_for_sort = []
+        yolo_dets = []
+
+        for det in pred:
+            if len(det):
+                det[:, :4] = scale_boxes(img.shape[2:], det[:, :4], frame.shape).round()
+                for *xyxy, conf, cls in det:
+                    x1, y1, x2, y2 = map(float, xyxy)
+                    detections_for_sort.append([x1, y1, x2, y2, float(conf)])
+                    yolo_dets.append([x1, y1, x2, y2, float(conf), int(cls)])
+
+        tracks = tracker.update(np.array(detections_for_sort))
+        unique_counter.update(tracks, yolo_dets)
+        line_counter.update(tracks)
+
+        for track in tracks:
+            x1, y1, x2, y2, track_id = map(int, track)
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0,255,0), 2)
+            cv2.putText(frame, f'ID {track_id}', (x1, y1-10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,0), 2)
+
+        counts = unique_counter.get_counts()
+        y_text = 30
+        for cls, cnt in counts.items():
+            cv2.putText(frame, f"{cls}: {cnt}", (20, y_text),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,0,255), 2)
+            y_text += 25
+
+        line_counter.draw(frame)
+        writer.write(frame)
+        if view_img:
+            shown = safe_imshow("Tracking + Line Counter", frame)
+            if shown and cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+
+
+    cap.release()
+    writer.release()
+    cv2.destroyAllWindows()
+
+    txt_path = save_dir / "counts.txt"
+    with open(txt_path, "w") as f:
+        f.write("Unique Object Counts Per Class\n")
+        for cls, cnt in unique_counter.get_counts().items():
+            f.write(f"{cls}: {cnt}\n")
+        f.write(f"\nEntry Count: {line_counter.entry_count}\n")
+        f.write(f"Exit Count: {line_counter.exit_count}\n")
+
+    print(f"\nResults saved to: {save_dir}")
+
+# ---------------- ARGPARSE ----------------
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--weights', type=str, default='yolov5s.pt')
+    parser.add_argument('--source', type=str, default='0')
+    parser.add_argument('--line_mode', type=str, default='both', choices=['entry', 'exit', 'both'])
+    parser.add_argument('--project', type=str, default='runs/count')
+    parser.add_argument('--name', type=str, default='exp')
+    parser.add_argument('--conf-thres', type=float, default=0.25)
+    parser.add_argument('--iou-thres', type=float, default=0.45)
+    parser.add_argument('--view-img', action='store_true', help='show results window')
+
+    args = parser.parse_args()
+
+    source = int(args.source) if args.source.isnumeric() else args.source
+    run(args.weights, source, args.line_mode, args.project, args.name,
+        args.conf_thres, args.iou_thres, args.view_img)
+
