@@ -88,7 +88,7 @@ def run(weights, source, imgsz, conf_thres, iou_thres, device, project, name):
     counted_ids = set()
 
     BUFFER_FRAMES = 300
-    line_y = 150
+    line_y = 200
     offset = 5
 
     save_dir = increment_path(Path(project) / name)
