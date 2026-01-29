@@ -31,7 +31,7 @@ from utils.torch_utils import select_device, smart_inference_mode
 def run(weights, source, imgsz, conf_thres, iou_thres, device, project, name):
 
     # 🎯 ONLY THESE CLASSES WILL BE COUNTED
-    filter_classes = ["car", "motorcycle"]
+    filter_classes = ["car","trucks"]
 
     counts_in = {c: 0 for c in filter_classes}
     counts_out = {c: 0 for c in filter_classes}
@@ -79,6 +79,11 @@ def run(weights, source, imgsz, conf_thres, iou_thres, device, project, name):
     model = DetectMultiBackend(weights, device=device)
     stride, names = model.stride, model.names
     imgsz = check_img_size(imgsz, s=stride)
+    # Create a stable color for each class
+    class_colors = {}
+    for i, name in names.items():
+        np.random.seed(i + 10)
+        class_colors[name.lower()] = tuple(int(x) for x in np.random.randint(50, 255, size=3))
 
     dataset = LoadStreams(source, img_size=imgsz, stride=stride) if source.isnumeric() else LoadImages(source, img_size=imgsz, stride=stride)
     tracker = Sort(max_age=30, min_hits=2, iou_threshold=0.2)
@@ -88,7 +93,7 @@ def run(weights, source, imgsz, conf_thres, iou_thres, device, project, name):
     counted_ids = set()
 
     BUFFER_FRAMES = 300
-    line_y = 200
+    line_y = 250
     offset = 5
 
     save_dir = increment_path(Path(project) / name)
@@ -164,7 +169,8 @@ def run(weights, source, imgsz, conf_thres, iou_thres, device, project, name):
                 track_last_seen[track_id] = frame_idx
                 current_centroids[track_id] = (cx, cy, cls_name)
 
-                color = get_class_color(det_classes[0]) if det_classes else (200,200,200)
+                color = class_colors.get(cls_name, (200, 200, 200))
+
                 annotator.box_label([x1, y1, x2, y2], f"{cls_name}", color=color)
 
             # 🔢 COUNTING
@@ -213,9 +219,9 @@ def run(weights, source, imgsz, conf_thres, iou_thres, device, project, name):
                 box_width  = max(w1, w2) + padding * 2
                 box_height = h1 + h2 + padding * 3
 
-                # Stable light color per class
-                np.random.seed(hash(cls) % 1000)
-                light_color = tuple(int(x) for x in np.random.randint(180, 240, size=3))
+                base_color = class_colors.get(cls, (180,180,180))
+                light_color = tuple(min(255, c + 80) for c in base_color)
+
 
                 top_left = (15, y - h1 - padding)
                 bottom_right = (15 + box_width, y + h2 + padding * 2)
