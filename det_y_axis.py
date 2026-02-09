@@ -740,6 +740,374 @@
 
 
 
+###########################################working good_based version_ v1
+
+
+
+
+
+
+# import argparse
+# import sys
+# import time
+# import traceback
+# from pathlib import Path
+# import cv2
+# import torch
+# import numpy as np
+# import os
+# import pathlib
+# from tqdm import tqdm
+# import signal
+
+# # ================= WINDOWS PATH FIX =================
+# temp = pathlib.PosixPath
+# pathlib.PosixPath = pathlib.WindowsPath
+
+# # ================= ROOT =================
+# FILE = Path(__file__).resolve()
+# ROOT = FILE.parents[0]
+# if str(ROOT) not in sys.path:
+#     sys.path.append(str(ROOT))
+# ROOT = Path(os.path.relpath(ROOT, Path.cwd()))
+
+# # ================= YOLOv5 =================
+# from models.common import DetectMultiBackend
+# from utils.dataloaders import LoadImages, LoadStreams
+# from utils.general import check_img_size, non_max_suppression, scale_boxes
+# from utils.torch_utils import select_device, smart_inference_mode
+# from sort.sort import Sort
+
+# # ================= CONFIG =================
+# LINE_X = 800  #650 sahithi
+# OFFSET = 10
+# BUFFER_SECONDS = 10
+# STOP_REQUESTED = False
+
+
+# def request_stop(sig=None, frame=None):
+#     global STOP_REQUESTED
+#     STOP_REQUESTED = True
+#     print("\n⚠ Exit requested — finalizing videos safely...")
+
+
+# signal.signal(signal.SIGINT, request_stop)
+# signal.signal(signal.SIGTERM, request_stop)
+
+
+# # ================= UTILITIES =================
+# def get_class_color(cls_name):
+#     np.random.seed(abs(hash(cls_name)) % (2**32))
+#     return tuple(int(c) for c in np.random.randint(40, 255, 3))
+
+
+# def get_next_video_path(save_dir, prefix):
+#     save_dir.mkdir(parents=True, exist_ok=True)
+#     existing = list(save_dir.glob(f"{prefix}_*.mp4"))
+#     if not existing:
+#         return save_dir / f"{prefix}_0001.mp4"
+#     nums = [int(p.stem.split("_")[-1]) for p in existing if p.stem.split("_")[-1].isdigit()]
+#     idx = max(nums) + 1 if nums else 1
+#     return save_dir / f"{prefix}_{idx:04d}.mp4"
+
+
+# # ==================================================
+# @smart_inference_mode()
+# def run(
+#     weights,
+#     source,
+#     imgsz=640,
+#     conf_thres=0.25,
+#     iou_thres=0.45,
+#     device="",
+#     project="runs/count",
+#     name="exp"
+# ):
+#     raw_writer = None
+#     ann_writer = None
+#     frame_idx = 0
+
+#     def draw_text_with_gold_box(
+#         img,
+#         text,
+#         pos,
+#         font=cv2.FONT_HERSHEY_SIMPLEX,
+#         font_scale=0.75,
+#         text_color=(255, 255, 255),
+#         bg_color=(0, 0, 0),
+#         border_color=(0, 215, 255),  # GOLD (BGR)
+#         thickness=2,
+#         padding=8,
+#         border_thickness=2
+#     ):
+#         x, y = pos
+
+#         (w, h), baseline = cv2.getTextSize(text, font, font_scale, thickness)
+#         h += baseline
+
+#         top_left = (x - padding, y - h - padding)
+#         bottom_right = (x + w + padding, y + padding)
+
+#         # Background
+#         cv2.rectangle(
+#             img,
+#             top_left,
+#             bottom_right,
+#             bg_color,
+#             -1
+#         )
+
+#         # Gold border
+#         cv2.rectangle(
+#             img,
+#             top_left,
+#             bottom_right,
+#             border_color,
+#             border_thickness
+#         )
+
+#         # Text
+#         cv2.putText(
+#             img,
+#             text,
+#             (x, y),
+#             font,
+#             font_scale,
+#             text_color,
+#             thickness,
+#             cv2.LINE_AA
+#         )
+
+#     try:
+#         # -------- VALIDATION --------
+#         if not os.path.exists(weights):
+#             raise FileNotFoundError(f"Weights not found: {weights}")
+
+#         is_webcam = source.isnumeric()
+#         if not is_webcam and not source.startswith("rtsp") and not os.path.exists(source):
+#             raise FileNotFoundError(f"Source not found: {source}")
+
+#         save_dir = Path(project) / name
+#         raw_video = get_next_video_path(save_dir, "raw")
+#         ann_video = get_next_video_path(save_dir, "annotated")
+
+#         # -------- MODEL --------
+#         device = select_device(device)
+#         model = DetectMultiBackend(weights, device=device)
+#         stride, names = model.stride, model.names
+#         imgsz = check_img_size(imgsz, s=stride)
+#         model.warmup(imgsz=(1, 3, imgsz, imgsz))
+
+#         # -------- DATASET --------
+#         dataset = LoadStreams(source, img_size=imgsz, stride=stride) \
+#             if is_webcam else LoadImages(source, img_size=imgsz, stride=stride)
+
+#         total_frames = None
+#         if not is_webcam and hasattr(dataset, "cap") and dataset.cap:
+#             tf = int(dataset.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+#             total_frames = tf if tf > 0 else None
+
+#         tracker = Sort(max_age=30, min_hits=2, iou_threshold=0.2)
+
+#         count_in = {v: 0 for v in names.values()}
+#         count_out = {v: 0 for v in names.values()}
+#         track_last_side = {}
+#         track_class = {}
+#         last_count_time = {}
+
+#         pbar = tqdm(dataset, total=total_frames, unit="frame", desc="Inference")
+
+#         for data in pbar:
+#             if STOP_REQUESTED:
+#                 break
+
+#             try:
+#                 frame_idx += 1
+#                 path, im, im0s, vid_cap, s = data
+#                 if im is None or im0s is None:
+#                     continue
+
+#                 raw_frame = im0s[0].copy() if isinstance(im0s, list) else im0s.copy()
+#                 frame = raw_frame.copy()
+
+#                 im = torch.from_numpy(im).to(device).float() / 255.0
+#                 if im.ndim == 3:
+#                     im = im[None]
+
+#                 pred = model(im)
+#                 pred = non_max_suppression(pred, conf_thres, iou_thres)
+
+#                 detections = []
+#                 if pred and len(pred[0]):
+#                     pred[0][:, :4] = scale_boxes(im.shape[2:], pred[0][:, :4], frame.shape).round()
+#                     for *xyxy, conf, cls in pred[0]:
+#                         x1, y1, x2, y2 = map(int, xyxy)
+#                         detections.append([x1, y1, x2, y2, conf.item(), int(cls)])
+
+#                 tracks = tracker.update(
+#                     np.array([d[:5] for d in detections]) if detections else np.empty((0, 5))
+#                 )
+
+#                 now = time.time()
+
+#                 for x1, y1, x2, y2, track_id in tracks.astype(int):
+#                     cx = (x1 + x2) // 2
+#                     best_iou, cls_name = 0, "unknown"
+
+#                     for d in detections:
+#                         xx1, yy1 = max(x1, d[0]), max(y1, d[1])
+#                         xx2, yy2 = min(x2, d[2]), min(y2, d[3])
+#                         inter = max(0, xx2 - xx1) * max(0, yy2 - yy1)
+#                         area1 = max(1, (x2 - x1) * (y2 - y1))
+#                         area2 = max(1, (d[2] - d[0]) * (d[3] - d[1]))
+#                         iou = inter / (area1 + area2 - inter + 1e-6)
+#                         if iou > best_iou:
+#                             best_iou = iou
+#                             cls_name = names.get(d[5], "unknown")
+
+#                     track_class.setdefault(track_id, cls_name)
+
+#                     if cx < LINE_X - OFFSET:
+#                         side = "left"
+#                     elif cx > LINE_X + OFFSET:
+#                         side = "right"
+#                     else:
+#                         side = "buffer"
+
+#                     prev = track_last_side.get(track_id)
+#                     last_time = last_count_time.get(track_id, 0)
+
+#                     if prev and side != prev and (now - last_time) > BUFFER_SECONDS:
+#                         if prev == "left" and side == "right":
+#                             count_in[cls_name] += 1
+#                             last_count_time[track_id] = now
+#                         elif prev == "right" and side == "left":
+#                             count_out[cls_name] += 1
+#                             last_count_time[track_id] = now
+
+#                     if side != "buffer":
+#                         track_last_side[track_id] = side
+
+#                     color = get_class_color(cls_name)
+#                     cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+#                     cv2.putText(frame, f"{cls_name} ID:{track_id}",
+#                                 (x1, max(20, y1 - 6)),
+#                                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+
+#                 cv2.line(frame, (LINE_X, 0), (LINE_X, frame.shape[0]), (0, 255, 255), 2)
+
+#                 y = 45
+#                 LINE_GAP = 32
+#                 CLASS_GAP = 18
+
+#                 for cls in count_in:
+#                     draw_text_with_gold_box(
+#                         frame,
+#                         f"{cls}  IN:{count_in[cls]}  OUT:{count_out[cls]}",
+#                         (15, y),
+#                         font_scale=0.75,
+#                         text_color=get_class_color(cls),   # per-class color
+#                         bg_color=(0, 0, 0),                # black box
+#                         border_color=(0, 215, 255),         # gold outline
+#                         border_thickness=2
+#                     )
+#                     y += LINE_GAP + CLASS_GAP
+
+
+
+#                 if raw_writer is None:
+#                     h, w = frame.shape[:2]
+#                     fps = vid_cap.get(cv2.CAP_PROP_FPS) if vid_cap else 25
+#                     raw_writer = cv2.VideoWriter(str(raw_video), cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
+#                     ann_writer = cv2.VideoWriter(str(ann_video), cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
+
+#                 raw_writer.write(raw_frame)
+#                 ann_writer.write(frame)
+
+#                 cv2.imshow("YOLOv5 Raw + Annotated", frame)
+#                 if cv2.waitKey(1) & 0xFF in [27, ord("q")]:
+#                     request_stop()
+
+#             except Exception:
+#                 traceback.print_exc()
+#                 continue
+
+#     finally:
+#         if raw_writer:
+#             raw_writer.release()
+#         if ann_writer:
+#             ann_writer.release()
+
+#         print(f"\n✅ Raw video saved: {raw_video}")
+#         print(f"✅ Annotated video saved: {ann_video}")
+#         print(f"📊 Total frames processed: {frame_idx}")
+#         cv2.destroyAllWindows()
+
+
+# # ================= CLI =================
+# def parse_opt():
+#     parser = argparse.ArgumentParser()
+#     parser.add_argument("--weights", required=True)
+#     parser.add_argument("--source", required=True)
+#     parser.add_argument("--imgsz", type=int, default=640)
+#     parser.add_argument("--conf-thres", type=float, default=0.25)
+#     parser.add_argument("--iou-thres", type=float, default=0.45)
+#     parser.add_argument("--device", default="")
+#     parser.add_argument("--project", default="runs/count")
+#     parser.add_argument("--name", default="exp")
+#     return parser.parse_args()
+
+
+# if __name__ == "__main__":
+#     opt = parse_opt()
+#     run(**vars(opt))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+############################################ working with properly
+
 
 
 
@@ -779,8 +1147,8 @@ from utils.torch_utils import select_device, smart_inference_mode
 from sort.sort import Sort
 
 # ================= CONFIG =================
-LINE_X = 800  #650 sahithi
-OFFSET = 10
+LINE_X = 800
+BUFFER_PX = 100
 BUFFER_SECONDS = 10
 STOP_REQUESTED = False
 
@@ -794,11 +1162,19 @@ def request_stop(sig=None, frame=None):
 signal.signal(signal.SIGINT, request_stop)
 signal.signal(signal.SIGTERM, request_stop)
 
-
 # ================= UTILITIES =================
 def get_class_color(cls_name):
     np.random.seed(abs(hash(cls_name)) % (2**32))
     return tuple(int(c) for c in np.random.randint(40, 255, 3))
+
+
+def get_zone(cx):
+    if cx < LINE_X - BUFFER_PX:
+        return "left"
+    elif cx > LINE_X + BUFFER_PX:
+        return "right"
+    else:
+        return "buffer"
 
 
 def get_next_video_path(save_dir, prefix):
@@ -809,6 +1185,32 @@ def get_next_video_path(save_dir, prefix):
     nums = [int(p.stem.split("_")[-1]) for p in existing if p.stem.split("_")[-1].isdigit()]
     idx = max(nums) + 1 if nums else 1
     return save_dir / f"{prefix}_{idx:04d}.mp4"
+
+
+def draw_text_with_gold_box(
+    img,
+    text,
+    pos,
+    font=cv2.FONT_HERSHEY_SIMPLEX,
+    font_scale=0.75,
+    text_color=(255, 255, 255),
+    bg_color=(0, 0, 0),
+    border_color=(0, 215, 255),
+    thickness=2,
+    padding=8,
+    border_thickness=2
+):
+    x, y = pos
+    (w, h), baseline = cv2.getTextSize(text, font, font_scale, thickness)
+    h += baseline
+
+    top_left = (x - padding, y - h - padding)
+    bottom_right = (x + w + padding, y + padding)
+
+    cv2.rectangle(img, top_left, bottom_right, bg_color, -1)
+    cv2.rectangle(img, top_left, bottom_right, border_color, border_thickness)
+
+    cv2.putText(img, text, (x, y), font, font_scale, text_color, thickness, cv2.LINE_AA)
 
 
 # ==================================================
@@ -827,59 +1229,7 @@ def run(
     ann_writer = None
     frame_idx = 0
 
-    def draw_text_with_gold_box(
-        img,
-        text,
-        pos,
-        font=cv2.FONT_HERSHEY_SIMPLEX,
-        font_scale=0.75,
-        text_color=(255, 255, 255),
-        bg_color=(0, 0, 0),
-        border_color=(0, 215, 255),  # GOLD (BGR)
-        thickness=2,
-        padding=8,
-        border_thickness=2
-    ):
-        x, y = pos
-
-        (w, h), baseline = cv2.getTextSize(text, font, font_scale, thickness)
-        h += baseline
-
-        top_left = (x - padding, y - h - padding)
-        bottom_right = (x + w + padding, y + padding)
-
-        # Background
-        cv2.rectangle(
-            img,
-            top_left,
-            bottom_right,
-            bg_color,
-            -1
-        )
-
-        # Gold border
-        cv2.rectangle(
-            img,
-            top_left,
-            bottom_right,
-            border_color,
-            border_thickness
-        )
-
-        # Text
-        cv2.putText(
-            img,
-            text,
-            (x, y),
-            font,
-            font_scale,
-            text_color,
-            thickness,
-            cv2.LINE_AA
-        )
-
     try:
-        # -------- VALIDATION --------
         if not os.path.exists(weights):
             raise FileNotFoundError(f"Weights not found: {weights}")
 
@@ -891,21 +1241,14 @@ def run(
         raw_video = get_next_video_path(save_dir, "raw")
         ann_video = get_next_video_path(save_dir, "annotated")
 
-        # -------- MODEL --------
         device = select_device(device)
         model = DetectMultiBackend(weights, device=device)
         stride, names = model.stride, model.names
         imgsz = check_img_size(imgsz, s=stride)
         model.warmup(imgsz=(1, 3, imgsz, imgsz))
 
-        # -------- DATASET --------
         dataset = LoadStreams(source, img_size=imgsz, stride=stride) \
             if is_webcam else LoadImages(source, img_size=imgsz, stride=stride)
-
-        total_frames = None
-        if not is_webcam and hasattr(dataset, "cap") and dataset.cap:
-            tf = int(dataset.cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            total_frames = tf if tf > 0 else None
 
         tracker = Sort(max_age=30, min_hits=2, iou_threshold=0.2)
 
@@ -915,17 +1258,13 @@ def run(
         track_class = {}
         last_count_time = {}
 
-        pbar = tqdm(dataset, total=total_frames, unit="frame", desc="Inference")
-
-        for data in pbar:
+        for data in tqdm(dataset, unit="frame", desc="Inference"):
             if STOP_REQUESTED:
                 break
 
             try:
                 frame_idx += 1
                 path, im, im0s, vid_cap, s = data
-                if im is None or im0s is None:
-                    continue
 
                 raw_frame = im0s[0].copy() if isinstance(im0s, list) else im0s.copy()
                 frame = raw_frame.copy()
@@ -952,41 +1291,39 @@ def run(
 
                 for x1, y1, x2, y2, track_id in tracks.astype(int):
                     cx = (x1 + x2) // 2
-                    best_iou, cls_name = 0, "unknown"
+                    cls_name = track_class.get(track_id, "unknown")
 
-                    for d in detections:
-                        xx1, yy1 = max(x1, d[0]), max(y1, d[1])
-                        xx2, yy2 = min(x2, d[2]), min(y2, d[3])
-                        inter = max(0, xx2 - xx1) * max(0, yy2 - yy1)
-                        area1 = max(1, (x2 - x1) * (y2 - y1))
-                        area2 = max(1, (d[2] - d[0]) * (d[3] - d[1]))
-                        iou = inter / (area1 + area2 - inter + 1e-6)
-                        if iou > best_iou:
-                            best_iou = iou
-                            cls_name = names.get(d[5], "unknown")
+                    if track_id not in track_class:
+                        best_iou = 0
+                        for d in detections:
+                            xx1, yy1 = max(x1, d[0]), max(y1, d[1])
+                            xx2, yy2 = min(x2, d[2]), min(y2, d[3])
+                            inter = max(0, xx2 - xx1) * max(0, yy2 - yy1)
+                            area1 = (x2 - x1) * (y2 - y1)
+                            area2 = (d[2] - d[0]) * (d[3] - d[1])
+                            iou = inter / (area1 + area2 - inter + 1e-6)
+                            if iou > best_iou:
+                                best_iou = iou
+                                cls_name = names.get(d[5], "unknown")
+                        track_class[track_id] = cls_name
 
-                    track_class.setdefault(track_id, cls_name)
-
-                    if cx < LINE_X - OFFSET:
-                        side = "left"
-                    elif cx > LINE_X + OFFSET:
-                        side = "right"
-                    else:
-                        side = "buffer"
-
-                    prev = track_last_side.get(track_id)
+                    zone = get_zone(cx)
+                    prev_zone = track_last_side.get(track_id)
                     last_time = last_count_time.get(track_id, 0)
 
-                    if prev and side != prev and (now - last_time) > BUFFER_SECONDS:
-                        if prev == "left" and side == "right":
+                    if prev_zone and zone != prev_zone and (now - last_time) > BUFFER_SECONDS:
+                        if prev_zone == "left" and zone in ["right", "buffer"]:
                             count_in[cls_name] += 1
                             last_count_time[track_id] = now
-                        elif prev == "right" and side == "left":
+                            track_last_side[track_id] = "right"
+
+                        elif prev_zone == "right" and zone in ["left", "buffer"]:
                             count_out[cls_name] += 1
                             last_count_time[track_id] = now
+                            track_last_side[track_id] = "left"
 
-                    if side != "buffer":
-                        track_last_side[track_id] = side
+                    if zone in ["left", "right"]:
+                        track_last_side[track_id] = zone
 
                     color = get_class_color(cls_name)
                     cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
@@ -994,37 +1331,34 @@ def run(
                                 (x1, max(20, y1 - 6)),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
+                # Draw lines
                 cv2.line(frame, (LINE_X, 0), (LINE_X, frame.shape[0]), (0, 255, 255), 2)
+                cv2.line(frame, (LINE_X - BUFFER_PX, 0), (LINE_X - BUFFER_PX, frame.shape[0]), (255, 215, 0), 1)
+                cv2.line(frame, (LINE_X + BUFFER_PX, 0), (LINE_X + BUFFER_PX, frame.shape[0]), (255, 215, 0), 1)
 
-                y = 45
-                LINE_GAP = 32
-                CLASS_GAP = 18
-
+                y = 40
                 for cls in count_in:
                     draw_text_with_gold_box(
                         frame,
                         f"{cls}  IN:{count_in[cls]}  OUT:{count_out[cls]}",
                         (15, y),
-                        font_scale=0.75,
-                        text_color=get_class_color(cls),   # per-class color
-                        bg_color=(0, 0, 0),                # black box
-                        border_color=(0, 215, 255),         # gold outline
-                        border_thickness=2
+                        text_color=get_class_color(cls)
                     )
-                    y += LINE_GAP + CLASS_GAP
-
-
+                    y += 35
 
                 if raw_writer is None:
                     h, w = frame.shape[:2]
-                    fps = vid_cap.get(cv2.CAP_PROP_FPS) if vid_cap else 25
+                    fps = vid_cap.get(cv2.CAP_PROP_FPS)
+                    if fps is None or fps <= 1:
+                        fps = 25
+
                     raw_writer = cv2.VideoWriter(str(raw_video), cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
                     ann_writer = cv2.VideoWriter(str(ann_video), cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
 
                 raw_writer.write(raw_frame)
                 ann_writer.write(frame)
 
-                cv2.imshow("YOLOv5 Raw + Annotated", frame)
+                cv2.imshow("YOLOv5 Counting", frame)
                 if cv2.waitKey(1) & 0xFF in [27, ord("q")]:
                     request_stop()
 
@@ -1038,10 +1372,10 @@ def run(
         if ann_writer:
             ann_writer.release()
 
+        cv2.destroyAllWindows()
         print(f"\n✅ Raw video saved: {raw_video}")
         print(f"✅ Annotated video saved: {ann_video}")
-        print(f"📊 Total frames processed: {frame_idx}")
-        cv2.destroyAllWindows()
+        print(f"📊 Frames processed: {frame_idx}")
 
 
 # ================= CLI =================
