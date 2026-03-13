@@ -233,8 +233,8 @@ import albumentations as A
 # =========================
 # Paths
 # =========================
-IMAGE_DIR = r"D:\bhanu\OneDrive - Imagevision.ai India Pvt Ltd\bhanu_iv061\TATA_V3_HIMALAYA\image_data_\day_1_(05_12_25)\tata_meach_side_view_images\bp_images\data_set_final\valid\images"
-LABEL_DIR = r"D:\bhanu\OneDrive - Imagevision.ai India Pvt Ltd\bhanu_iv061\TATA_V3_HIMALAYA\image_data_\day_1_(05_12_25)\tata_meach_side_view_images\bp_images\data_set_final\valid\labels"
+IMAGE_DIR = r"D:\crown\images\cam 1 (L30766761)\New folder\images"
+LABEL_DIR = r"D:\crown\images\cam 1 (L30766761)\New folder\txt_labels"
 AUG_IMAGE_DIR = os.path.join(os.path.dirname(IMAGE_DIR), "aug_imagesbp_")
 AUG_LABEL_DIR = os.path.join(os.path.dirname(LABEL_DIR), "aug_labelsbp_")
 

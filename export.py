@@ -55,6 +55,19 @@ import sys
 import time
 import warnings
 from pathlib import Path
+import pathlib
+from pathlib import Path
+import sys
+import os
+
+temp = pathlib.PosixPath
+pathlib.PosixPath = pathlib.WindowsPath
+
+FILE = Path(__file__).resolve()
+ROOT = FILE.parents[0]
+if str(ROOT) not in sys.path:
+    sys.path.append(str(ROOT))
+ROOT = Path(os.path.relpath(ROOT, Path.cwd()))
 
 import pandas as pd
 import torch

@@ -6,14 +6,126 @@ from pathlib import Path
 from collections import defaultdict
 import os 
 
+def help():
+    print("""
+========================================================
+YOLOv5 + SORT Object Tracking, Unique Counting & Line Counter
+========================================================
+
+This script performs REAL-TIME or OFFLINE VIDEO analysis using YOLOv5
+for object detection and SORT for object tracking.
+
+It detects objects, assigns a unique ID to each object, counts unique
+objects per class, and counts ENTRY / EXIT events when objects cross
+a horizontal line.
+
+--------------------------------------------------------
+WORKING FLOW
+--------------------------------------------------------
+
+1. Model Loading
+   - Loads a YOLOv5 model using the provided weights.
+   - Automatically selects CPU or GPU.
+
+2. Video Input
+   - Accepts a video file or live camera stream.
+   - Reads frames continuously using OpenCV.
+
+3. Object Detection (YOLOv5)
+   - Each frame is resized using letterbox.
+   - YOLOv5 detects objects and outputs bounding boxes,
+     confidence scores, and class IDs.
+   - Non-Max Suppression removes duplicate detections.
+
+4. Object Tracking (SORT)
+   - Detected bounding boxes are passed to the SORT tracker.
+   - SORT assigns a unique TRACK ID to each object.
+   - IDs persist across frames for the same object.
+
+5. Unique Object Counting
+   - Each TRACK ID is matched with the best YOLO detection
+     using IOU overlap.
+   - Every object is counted ONLY ONCE per class.
+   - Prevents double counting of the same object.
+
+6. Line Crossing Counter
+   - A horizontal line is placed at a fixed Y position.
+   - The object center is tracked frame-to-frame.
+   - When an object crosses the line:
+       • Top → Bottom  → ENTRY
+       • Bottom → Top  → EXIT
+   - Mode can be:
+       entry  → count only entries
+       exit   → count only exits
+       both   → count both
+
+7. Visualization
+   - Draws bounding boxes and track IDs.
+   - Displays class-wise unique counts.
+   - Displays entry and exit counts.
+   - Draws the counting line.
+
+8. Output Saving
+   - Saves annotated output video.
+   - Saves a text file with:
+       • Unique object counts per class
+       • Total entry count
+       • Total exit count
+
+--------------------------------------------------------
+USAGE
+--------------------------------------------------------
+
+python track_count_line.py 
+    --weights <weights_path>
+    --source <video_path | camera_id>
+    --line_mode <entry | exit | both>
+    --project <output_directory>
+    --name <experiment_name>
+    --conf_thres <confidence_threshold>
+    --iou_thres <iou_threshold>
+    --view_img
+
+--------------------------------------------------------
+ARGUMENT DETAILS
+--------------------------------------------------------
+
+--weights      Path to YOLOv5 model weights (e.g. yolov5s.pt)
+--source       Video file path or camera ID (0 for webcam)
+--line_mode    Counting mode: entry, exit, or both
+--project      Directory to save results
+--name         Subfolder name inside project directory
+--conf_thres   Minimum confidence threshold for detections
+--iou_thres    IOU threshold for NMS
+--view_img     Display live result window (press 'q' to quit)
+
+--------------------------------------------------------
+OUTPUT FILES
+--------------------------------------------------------
+
+• Output Video:
+  <project>/<name>/output.mp4
+
+• Counts File:
+  <project>/<name>/counts.txt
+
+--------------------------------------------------------
+EXAMPLE
+--------------------------------------------------------
+
+python track_count_line.py --weights yolov5s.pt --source video.mp4 --line_mode both --view_img
+
+========================================================
+""")
+    sys.exit(0)
+
+
 def safe_imshow(win_name, frame):
     try:
         cv2.imshow(win_name, frame)
         return True
     except cv2.error:
         return False
-
-
 
 # ---------------- YOLOv5 IMPORT ----------------
 FILE = Path(__file__).resolve()
@@ -195,6 +307,7 @@ def run(weights, source, line_mode, project, name, conf_thres, iou_thres, view_i
 
 # ---------------- ARGPARSE ----------------
 if __name__ == "__main__":
+    help()
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('--weights', type=str, default='yolov5s.pt')

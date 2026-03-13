@@ -28,6 +28,13 @@ from utils.general import check_img_size, non_max_suppression, scale_boxes, incr
 from utils.torch_utils import select_device, smart_inference_mode
 from utils.dataloaders import LoadImages, LoadStreams
 
+# ------------------ INIT ------------------
+counts = {name: 0 for name in names.values()}
+tracker = Sort()
+prev_centroids = {}
+counted_ids = set()  # ← ADD THIS
+line_y = 400
+
 @smart_inference_mode()
 def run(weights="yolov5s-seg.pt", source="0", imgsz=(640, 640),
         conf_thres=0.25, iou_thres=0.45, device="", project="runs/seg_count",
@@ -181,9 +188,12 @@ def run(weights="yolov5s-seg.pt", source="0", imgsz=(640, 640),
 
             # ---- COUNTING (correct position) ----
             for obj_id, (cx, cy, cls) in current_centroids.items():
-                if obj_id in prev_centroids and is_crossing(prev_centroids[obj_id][1], cy):
+                if (obj_id not in counted_ids and          # ← never counted before
+                    obj_id in prev_centroids and
+                    is_crossing(prev_centroids[obj_id][1], cy)):
                     if cls in counts:
                         counts[cls] += 1
+                        counted_ids.add(obj_id)            # ← mark as counted
 
             prev_centroids = current_centroids
 

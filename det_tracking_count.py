@@ -1179,7 +1179,7 @@ from utils.torch_utils import select_device, smart_inference_mode
 def run(weights, source, imgsz, conf_thres, iou_thres, device, project, name):
 
     # 🎯 ONLY THESE CLASSES WILL BE COUNTED
-    filter_classes = ["car", "motorcycle"]
+    filter_classes = ["person"]
 
     counts_in = {c: 0 for c in filter_classes}
     counts_out = {c: 0 for c in filter_classes}
@@ -1280,7 +1280,8 @@ def run(weights, source, imgsz, conf_thres, iou_thres, device, project, name):
                 pred[0][:, :4] = scale_boxes(im.shape[2:], pred[0][:, :4], im0.shape).round()
                 for *xyxy, conf, cls in pred[0]:
                     class_name = names[int(cls)].strip().lower()
-
+                    if class_name != "person":
+                        continue
                     x1, y1, x2, y2 = map(int, xyxy)
                     detections.append([x1, y1, x2, y2, conf.item()])
                     det_boxes.append([x1, y1, x2, y2])
@@ -1312,7 +1313,8 @@ def run(weights, source, imgsz, conf_thres, iou_thres, device, project, name):
                 track_last_seen[track_id] = frame_idx
                 current_centroids[track_id] = (cx, cy, cls_name)
 
-                color = get_class_color(det_classes[0]) if det_classes else (200,200,200)
+                #color = get_class_color(det_classes[0]) if det_classes else (200,200,200)
+                color = get_class_color(0)  # person class id
                 annotator.box_label([x1, y1, x2, y2], f"{cls_name}", color=color)
 
             # 🔢 COUNTING
@@ -1365,6 +1367,110 @@ def run(weights, source, imgsz, conf_thres, iou_thres, device, project, name):
         print("\n✅ Video saved:", video_path)
 
 
+def help():
+    """
+    ============================================================
+    YOLOv5 + SORT Person Counting Script
+    ============================================================
+
+    WHAT THIS SCRIPT DOES
+    ---------------------
+    • Detects ONLY 'person' class using YOLOv5
+    • Tracks detected persons using SORT tracker
+    • Draws a horizontal counting line in the frame
+    • Counts:
+        - IN  : person crossing from above → below the line
+        - OUT : person crossing from below → above the line
+    • Adds:
+        - Bounding boxes
+        - Live counts (IN / OUT)
+        - Company logo (top-left)
+        - Diagonal watermark (demo purpose)
+    • Saves the processed video to disk
+    • Displays live output window
+
+    ------------------------------------------------------------
+    PIPELINE FLOW
+    ------------------------------------------------------------
+    1️⃣ Load YOLOv5 model (DetectMultiBackend)
+    2️⃣ Read input:
+        - Webcam (source=0)
+        - Video file
+        - Image folder
+    3️⃣ Run object detection (YOLOv5)
+    4️⃣ Filter detections → ONLY 'person'
+    5️⃣ Track persons using SORT (assign unique IDs)
+    6️⃣ Compute centroid (cx, cy) for each tracked person
+    7️⃣ Check which side of the line the person is on:
+        - above
+        - below
+        - buffer zone
+    8️⃣ Count crossing events:
+        - above → below  → IN
+        - below → above  → OUT
+        (each ID counted only once)
+    9️⃣ Draw overlays:
+        - Bounding boxes
+        - Counting line
+        - IN / OUT counters
+        - Logo + watermark
+    🔟 Save final annotated video
+
+    ------------------------------------------------------------
+    COUNTING LOGIC
+    ------------------------------------------------------------
+    • Horizontal line position: line_y = 200
+    • Buffer offset: ±5 pixels
+    • Each tracked ID is counted only once
+    • Prevents double counting using:
+        - track_side_memory
+        - counted_ids
+
+    ------------------------------------------------------------
+    OUTPUT
+    ------------------------------------------------------------
+    • Output folder:
+        runs/count/<exp_name>/
+    • Output file:
+        output.mp4
+    • Window name:
+        "Counting"
+
+    ------------------------------------------------------------
+    COMMAND LINE USAGE
+    ------------------------------------------------------------
+    python count.py \
+        --weights yolov5s.pt \
+        --source input.mp4 \
+        --imgsz 640 \
+        --conf-thres 0.25 \
+        --iou-thres 0.45 \
+        --device 0 \
+        --project runs/count \
+        --name exp
+
+    ------------------------------------------------------------
+    ARGUMENTS
+    ------------------------------------------------------------
+    --weights     Path to YOLOv5 model weights (required)
+    --source      Input source (video/image/webcam index)
+    --imgsz       Inference image size (default: 640)
+    --conf-thres  Confidence threshold (default: 0.25)
+    --iou-thres   NMS IoU threshold (default: 0.45)
+    --device      CUDA device (0, 1, or 'cpu')
+    --project     Output directory
+    --name        Experiment name
+
+    ------------------------------------------------------------
+    EXIT
+    ------------------------------------------------------------
+    • Press 'q' to stop processing
+    • Video is saved safely on exit
+
+    ============================================================
+    """
+    
+
 def parse_opt():
     parser = argparse.ArgumentParser()
     parser.add_argument("--weights", type=str, required=True)
@@ -1382,4 +1488,5 @@ def parse_opt():
 
 if __name__ == "__main__":
     opt = parse_opt()
+    print(help.__doc__)
     run(**vars(opt))

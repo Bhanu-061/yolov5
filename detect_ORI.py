@@ -247,6 +247,155 @@ def run(
         strip_optimizer(weights[0])  # update model (to fix SourceChangeWarning)
 
 
+
+def help():
+    print("""
+========================================================
+YOLOv5 Object Detection Pipeline (Images / Video / Stream)
+========================================================
+
+This script performs object detection using YOLOv5 on images, videos,
+webcams, or streams. It supports saving results as annotated images,
+videos, text labels, cropped objects, and CSV files.
+
+--------------------------------------------------------
+WORKING FLOW
+--------------------------------------------------------
+
+1. Environment & Path Setup
+   - Fixes Windows/Linux path compatibility.
+   - Adds YOLOv5 root directory to Python path.
+   - Loads required YOLOv5 utilities and modules.
+
+2. Input Source Handling
+   - Supports:
+       • Image files / folders
+       • Video files
+       • Webcam (source=0)
+       • RTSP / HTTP streams
+       • Screen capture
+   - Automatically selects the correct dataloader.
+
+3. Model Loading
+   - Loads YOLOv5 model using DetectMultiBackend.
+   - Supports:
+       • PyTorch (.pt)
+       • ONNX (via OpenCV DNN)
+       • FP16 inference (half precision)
+   - Automatically selects CPU or GPU.
+
+4. Image Preprocessing
+   - Converts input frames to tensors.
+   - Normalizes pixel values to range [0, 1].
+   - Adjusts image size based on model stride.
+
+5. Inference
+   - Runs forward pass through YOLOv5.
+   - Optional augmented inference.
+   - Optional feature visualization.
+
+6. Non-Max Suppression (NMS)
+   - Removes overlapping bounding boxes.
+   - Filters detections using:
+       • Confidence threshold
+       • IoU threshold
+       • Optional class filtering
+
+7. Prediction Processing
+   - Rescales bounding boxes to original image size.
+   - Assigns class labels and confidence scores.
+   - Draws bounding boxes and labels on frames.
+
+8. Output Options
+   - Save annotated images or videos.
+   - Save detection labels to TXT files:
+       • YOLO format (xywh normalized)
+       • Pascal VOC format (xyxy)
+   - Save cropped detected objects.
+   - Save detection results to CSV file with:
+       • Image name
+       • Predicted class
+       • Confidence score
+
+9. CSV Logging
+   - Automatically creates predictions.csv.
+   - Appends detection data for each image/frame.
+   - Useful for analytics, reporting, and audits.
+
+10. Visualization
+    - Displays live detection results in a window.
+    - Supports resizing on Linux systems.
+
+11. Performance Logging
+    - Logs preprocessing, inference, and NMS time.
+    - Displays per-image inference speed.
+
+12. Result Management
+    - Automatically increments output folders:
+        runs/detect/exp, exp2, exp3, ...
+    - Option to reuse existing folder.
+
+--------------------------------------------------------
+USAGE
+--------------------------------------------------------
+
+python detect.py 
+    --weights yolov5s.pt
+    --source data/images
+    --conf-thres 0.25
+    --iou-thres 0.45
+    --save-csv
+    --view-img
+
+--------------------------------------------------------
+KEY ARGUMENTS
+--------------------------------------------------------
+
+--weights        Path to model weights
+--source         Image / video / webcam / stream input
+--imgsz          Inference image size
+--conf-thres     Detection confidence threshold
+--iou-thres      NMS IoU threshold
+--device         CUDA device or CPU
+--view-img       Show live results
+--save-txt       Save labels to TXT files
+--save-format    0 = YOLO format, 1 = Pascal VOC
+--save-csv       Save detections to CSV file
+--save-conf      Save confidence scores
+--save-crop      Save cropped detections
+--nosave         Do not save images/videos
+--classes        Filter detections by class ID
+--half           Use FP16 inference
+--dnn            Use OpenCV DNN for ONNX models
+
+--------------------------------------------------------
+OUTPUT
+--------------------------------------------------------
+
+• Annotated images/videos:
+  runs/detect/<exp_name>/
+
+• Label files (if enabled):
+  runs/detect/<exp_name>/labels/
+
+• CSV file:
+  runs/detect/<exp_name>/predictions.csv
+
+--------------------------------------------------------
+NOTES
+--------------------------------------------------------
+
+• Supports batch inference on videos and streams.
+• CSV output is ideal for reporting and dashboards.
+• FP16 improves speed on supported GPUs.
+• Designed for production and research use.
+
+========================================================
+""")
+    sys.exit(0)
+
+
+
 def parse_opt():
 
 
@@ -300,4 +449,5 @@ def main(opt):
 
 if __name__ == "__main__":
     opt = parse_opt()
+    help()
     main(opt)
